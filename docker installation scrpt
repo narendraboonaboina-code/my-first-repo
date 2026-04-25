@@ -1,0 +1,18 @@
+# Update packages
+sudo yum update -y
+
+# Install Docker
+sudo yum install docker -y
+
+# Start Docker
+sudo systemctl start docker
+
+# Enable Docker on boot
+sudo systemctl enable docker
+
+# Add current user to docker group
+sudo usermod -aG docker $USER
+
+# Verify
+docker --version
+docker ps
