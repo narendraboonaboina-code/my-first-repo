@@ -1,0 +1,118 @@
+#!/bin/bash
+
+# Tomcat Installation Script for Ubuntu/Debian
+# Tested on Ubuntu 22.04/24.04
+
+set -e
+
+# Configuration
+TOMCAT_VERSION="11.0.0-M20"  # Update to latest stable
+INSTALL_DIR="/opt/tomcat"
+TOMCAT_USER="tomcat"
+TOMCAT_GROUP="tomcat"
+JAVA_VERSION="21"  # Latest LTS
+
+echo "Installing Apache Tomcat $TOMCAT_VERSION..."
+
+# Check if running as root
+if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root (use sudo)"
+   exit 1
+fi
+
+# Install Java
+echo "Installing OpenJDK $JAVA_VERSION..."
+apt update
+apt install -y openjdk-$JAVA_VERSION-jdk curl wget jq
+
+export JAVA_HOME=/usr/lib/jvm/java-$JAVA_VERSION-openjdk-amd64
+
+# Create tomcat user and group
+if ! getent group $TOMCAT_GROUP > /dev/null; then
+    groupadd -r $TOMCAT_GROUP
+fi
+if ! id $TOMCAT_USER > /dev/null 2>&1; then
+    useradd -r -g $TOMCAT_GROUP -s /bin/false -d $INSTALL_DIR $TOMCAT_USER
+fi
+
+# Create install directory
+mkdir -p $INSTALL_DIR
+chown $TOMCAT_USER:$TOMCAT_GROUP $INSTALL_DIR
+
+# Download latest Tomcat
+TOMCAT_URL="[downloads.apache.org](https://downloads.apache.org/tomcat/tomcat-$TOMCAT_VERSION/bin/apache-tomcat-$TOMCAT_VERSION.tar.gz)"
+TEMP_FILE="/tmp/tomcat-$TOMCAT_VERSION.tar.gz"
+
+echo "Downloading Tomcat $TOMCAT_VERSION..."
+wget -O $TEMP_FILE $TOMCAT_URL
+
+# Extract and setup
+tar xzf $TEMP_FILE -C $INSTALL_DIR --strip-components=1
+chown -R $TOMCAT_USER:$TOMCAT_GROUP $INSTALL_DIR
+rm $TEMP_FILE
+
+# Setup tomcat-users.xml for manager access
+cat > $INSTALL_DIR/conf/tomcat-users.xml << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<tomcat-users xmlns="[tomcat.apache.org](http://tomcat.apache.org/xml)"
+              xmlns:xsi="[w3.org](http://www.w3.org/2001/XMLSchema-instance)"
+              xsi:schemaLocation="[tomcat.apache.org](http://tomcat.apache.org/xml) tomcat-users.xsd"
+              version="1.0">
+  <role rolename="manager-gui"/>
+  <role rolename="manager-script"/>
+  <role rolename="admin-gui"/>
+  <user username="admin" password="changeme123" roles="admin-gui,manager-gui,manager-script"/>
+</tomcat-users>
+EOF
+
+# Create systemd service
+cat > /etc/systemd/system/tomcat.service << EOF
+[Unit]
+Description=Apache Tomcat Web Application Container
+After=network.target
+
+[Service]
+Type=forking
+User=$TOMCAT_USER
+Group=$TOMCAT_GROUP
+Environment="JAVA_HOME=$JAVA_HOME"
+Environment="CATALINA_PID=$INSTALL_DIR/temp/tomcat.pid"
+Environment="CATALINA_HOME=$INSTALL_DIR"
+Environment="CATALINA_BASE=$INSTALL_DIR"
+Environment="CATALINA_OPTS=-Xms512M -Xmx2048M -server"
+Environment="JAVA_OPTS=-Djava.awt.headless=true -Djava.security.egd=file:/dev/./urandom"
+
+ExecStart=$INSTALL_DIR/bin/startup.sh
+ExecStop=$INSTALL_DIR/bin/shutdown.sh
+RestartSec=10
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start service
+systemctl daemon-reload
+systemctl enable tomcat
+systemctl start tomcat
+
+# Open firewall
+ufw allow 8080/tcp 2>/dev/null || true
+
+echo "✅ Tomcat $TOMCAT_VERSION installed successfully!"
+echo ""
+echo "🌐 Access Tomcat at: [localhost](http://localhost:8080)"
+echo "👤 Manager: [localhost](http://localhost:8080/manager/html)"
+echo "   Username: admin"
+echo "   Password: changeme123 (CHANGE THIS IMMEDIATELY!)"
+echo ""
+echo "📋 Service commands:"
+echo "   sudo systemctl start tomcat"
+echo "   sudo systemctl stop tomcat"
+echo "   sudo systemctl status tomcat"
+echo "   sudo systemctl logs tomcat --follow"
+echo ""
+echo "⚙️  Config files:"
+echo "   $INSTALL_DIR/conf/server.xml"
+echo "   $INSTALL_DIR/conf/tomcat-users.xml"
+echo "   $INSTALL_DIR/webapps/"
