@@ -1,0 +1,8 @@
+# Update packages
+sudo yum update -y
+
+# Install Maven
+sudo yum install maven -y
+
+# Check version
+mvn -version
